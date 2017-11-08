@@ -1,0 +1,52 @@
+# Scrapes all months of a given year and saves locally on a month-by-month basis -- using toy path and directory names in this code sample.
+# Allows for scraping of up to 100,000 NLM Pubmed abstracts from each month of a given year, the maximum allowed by the NLM eutils API without additional processing.
+# The "abslist" and "abstokens" directories contain the resulting corpora (semantic spaces). The last two lines of vode are simply to demonstrate how the subsequent vectorization step would be applied to the corpora for use in e.g. Gensim-based LSA comparison.
+import gensim
+from gensim import corpora, models, similarities
+import urllib.request
+import nltk, string
+from nltk.corpus import stopwords
+import simplejson
+from bs4 import BeautifulSoup
+stemmer = nltk.stem.porter.PorterStemmer()
+remove_punctuation_map = dict((ord(char), None) for char in string.punctuation)
+def stem_tokens(tokens):
+    return [stemmer.stem(item) for item in tokens]
+def normalize(text):
+    return stem_tokens(nltk.word_tokenize(text.lower().translate(remove_punctuation_map)))
+stoplist = set(stopwords.words('english'))
+print("This tool will create a series of Pubmed abstract corpora from each of the months of a given input year.")
+year = input("Enter a year to scrape Pubmed abstracts for each of its months. ")
+for i in range(0,12):
+    month = str(i + 1).zfill(2)
+    #print(month)
+    monthyear = ('%s/' + year) %(month,)
+    monthyearwithpdat = monthyear + '[pdat]'
+    monthyearmod = monthyear.replace('/', '_')
+    print(monthyearmod)
+    bydateabssearch = urllib.request.urlopen('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=' + monthyearwithpdat + '&retmax=100000&usehistory=y').read()
+    soup = BeautifulSoup(bydateabssearch, "lxml")
+    for w in soup.find_all("webenv"): 
+        webenvtext = w.get_text()
+    webenvstring = str(webenvtext)
+    bydateabsfetch = urllib.request.urlopen('http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&query_key=1&webenv=' + webenvstring + '&retmax=100000&retmode=XML&rettype=abstract').read()
+    bydateabstractsoup = BeautifulSoup(bydateabsfetch, "lxml")
+    cpinfoout = bydateabstractsoup.findAll(lambda tag:tag.name == 'copyrightinformation' )
+    cpinfotree = [cp.extract() for cp in cpinfoout]
+    for tag in bydateabstractsoup.findAll(True):
+        if tag.name == 'abstracttext':
+            tag.hidden = True
+    abstracts = (bydateabstractsoup.find_all('abstract'))
+    abstracts = str(abstracts)
+    abstracts = abstracts.replace('\n', '')
+    abstractsremovetags = abstracts.replace('[<abstract>','').replace('</abstract>]','')
+    abstractsdoclist = abstractsremovetags.split('</abstract>, <abstract>')
+    abslist = open('C:\\Users\\Wescom~1\\Pythontestsaveddocs\\abslist\\' + monthyearmod + '.txt', 'w')
+    simplejson.dump(abstractsdoclist, abslist)
+    abslist.close()
+    filtered_abstract = [[word for word in normalize(document) if word not in stoplist] for document in abstractsdoclist]  
+    abstokens = open('C:\\Users\\Wescom~1\\Pythontestsaveddocs\\abstokens\\' + monthyearmod + '.txt', 'w')
+    simplejson.dump(filtered_abstract, abstokens)
+    abstokens.close()
+    dictionary_abstracts = corpora.Dictionary(filtered_abstract)
+    corpus = [dictionary_abstracts.doc2bow(text) for text in filtered_abstract]
